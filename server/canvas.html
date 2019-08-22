@@ -1,0 +1,102 @@
+<html>
+<head>
+<script src="https://code.jquery.com/jquery-3.4.1.min.js"
+  integrity="sha256-CSXorXvZcTkaix6Yvo6HppcZGetbYMGWSFlBw8HfCJo=" crossorigin="anonymous"></script>
+<!--[if IE]><script type="text/javascript" src="/excanvas.js"></script><![endif]-->
+<script type="text/javascript">
+    // Variables to record the (x,y) coordinate pairs traversed by the mouse cursor
+    // and the state (pressed, unpressed) of the mouse button
+    var moves = new Array();
+    var pressed;
+    function initCanvas() {
+      var canvasDiv = document.getElementById('canvas'); 
+      canvas = document.createElement('canvas'); 
+      canvas.setAttribute('width', 256); 
+      canvas.setAttribute('height', 256); 
+      canvas.setAttribute('id', 'canvas'); 
+      canvasDiv.appendChild(canvas); 
+      if(typeof G_vmlCanvasManager != 'undefined') { 
+        canvas = G_vmlCanvasManager.initElement(canvas); 
+      } 
+
+      context = canvas.getContext("2d");
+
+      $('#canvas').mousedown(function (e) {
+        pressed = true;
+        moves.push([e.pageX - this.offsetLeft,
+        e.pageY - this.offsetTop,
+          false]);
+        redraw();
+      });
+
+      $('#canvas').mousemove(function (e) {
+        if (pressed) {
+          moves.push([e.pageX - this.offsetLeft,
+          e.pageY - this.offsetTop,
+            true]);
+          redraw();
+        }
+      });
+
+      $('#canvas').mouseup(function (e) {
+        pressed = false;
+      });
+
+      $('#canvas').mouseleave(function (e) {
+        pressed = false;
+      });
+      redraw();
+  }
+
+  function redraw() {
+    canvas.width = canvas.width; // Limpia el lienzo
+
+    context.strokeStyle = "#0000a0";
+    context.lineJoin = "round";
+    context.lineWidth = 6;
+
+    for (var i = 0; i < moves.length; i++) {
+      context.beginPath();
+      if (moves[i][2] && i) {
+        context.moveTo(moves[i - 1][0], moves[i - 1][1]);
+      } else {
+        context.moveTo(moves[i][0], moves[i][1]);
+      }
+      context.lineTo(moves[i][0], moves[i][1]);
+      context.closePath();
+      context.stroke();
+    }
+  }
+
+  // $("#data").submit(function (e) {
+  //     e.preventDefault();
+  //     $(this).append("mask", canvas.toDataURL());
+  //     var formData = $(this).serialize();
+
+  //     console.log($(this));
+  //     $.post("/upload", formData);
+
+  //     return false;
+  //   });
+    
+  function upload() {
+   $.post("/upload", {
+      mask : canvas.toDataURL()
+      }).then(function (data) {
+        $('#mask').attr('src', 'http://localhost:8020/getmask?timestamp=' + data);
+        $('#result').attr('src', 'http://localhost:8020/getresult?timestamp=' + data);
+      });
+    }
+
+</script>
+</head>
+<body style="background: #eee;" id="body" onload="initCanvas();">
+<img id="image" style="width: 256px; height: 256px; position: absolute; left: 0px; top: 10px;" src="/static/images/images/example.jpeg">
+<!-- <input type="file" id="img" name="img" accept="image/*" style="position:absolute; left: 0px; top: 220px;"> -->
+<button onclick="upload()" style="position:absolute; top: 286px; left: 256px">Submit</button>
+<div id="canvas" style="width: 256px; height: 256px; background-image: url('/static/images/images/example.jpeg'); position: absolute; left: 270; top: 10px;"></div>
+<img id="mask" style="width: 256px; height: 256px; background: #fff; position: absolute; left: 540px; top: 10px;">
+<img id="result" style="width: 256px; height: 256px; background: #fff; position: absolute; left: 800px; top: 10px;">
+</body>
+</html>
+

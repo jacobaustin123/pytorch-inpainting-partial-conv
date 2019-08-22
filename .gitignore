@@ -1,0 +1,8 @@
+masks/*
+images/*
+data/*
+__pycache__
+.vscode
+backup
+server/static/results
+server/static/masks
