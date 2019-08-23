@@ -5,6 +5,7 @@ import torch.nn as nn
 import numpy as np
 import argparse
 import itertools
+import PIL
 
 from torch.utils.data import TensorDataset, DataLoader
 from torchvision.datasets import ImageFolder
@@ -29,6 +30,7 @@ parser.add_argument('--single_gpu', default=False, action='store_false', help='u
 parser.add_argument('--reset', default=False, action='store_true', help='delete saved parameters and reset all configurations')
 parser.add_argument('--savedir', type=str, default='saved', help='directory with saved configurations and parameters')
 parser.add_argument('--valid_freq', type=int, default=500, help='frequency of evaluation on valid dataset')
+parser.add_argument('--freeze_bn', default=False, action='store_true', help='freeze the batchnorm layer for encoder layers')
 
 args = parser.parse_args()
 
@@ -39,7 +41,7 @@ def unnormalize(image):
     return (image.transpose(1, 3) * std + mean).transpose(1, 3)
 
 device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-masks = ImageFolder("masks", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.Grayscale(), transforms.ToTensor()]))
+masks = ImageFolder("masks/original-mask", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.Grayscale(), transforms.Lambda(lambda img : PIL.ImageOps.invert(img)), transforms.ToTensor()]))
 train = ImageFolder("images/train", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = std)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 valid = ImageFolder("images/val", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = mean)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
@@ -49,12 +51,12 @@ mean = mean.to(device)
 train_loader = DataLoader(train, num_workers=4, batch_size=args.batch_size, pin_memory=True, drop_last=True, shuffle=True)
 valid_loader = DataLoader(valid, num_workers=0, batch_size=args.batch_size, pin_memory=True, drop_last=True, shuffle=True)
 
-mask_loader = iter(DataLoader(masks, num_workers=0, batch_size=args.batch_size, pin_memory=True, drop_last=True))
+mask_loader = iter(DataLoader(masks, num_workers=0, batch_size=args.batch_size, pin_memory=True, drop_last=True, shuffle=True))
 
 print("Training partial convolution inpainting model with parameters {}".format(args))
 print("Train dataset is {}, valid dataset is {}".format(train, valid))
 
-model = Model()
+model = Model(freeze_bn=args.freeze_bn)
 criterion = VGG16FeatureExtractor()
 loss_func = Loss(criterion)
 
@@ -66,7 +68,7 @@ model.to(device)
 criterion.to(device)
 loss_func.to(device)
 
-optimizer = optim.Adam(model.parameters(), lr=args.lr) # betas=(0.5, 0.999)
+optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr) # betas=(0.5, 0.999)
 
 def try_remove(path):
     try:
@@ -84,11 +86,11 @@ if args.reset:
 if os.path.exists(saved_params) and args.resume:
     try:
         model.load_state_dict(torch.load(saved_params))
-        print("Loaded saved parameters dict")
+        print("Loaded saved parameters dict {}".format(saved_params))
     except:
-        print("Could not load parameters dict")
+        print("Could not load parameters dict {}".format(saved_params))
 
-if os.path.exists(saved_stats):
+if os.path.exists(saved_stats) and args.resume:
     with open(saved_stats, "r") as f:
         stats = json.load(f)
 
@@ -96,33 +98,61 @@ if os.path.exists(saved_stats):
 else:
     lowest = 1E50
 
-def network(image):
+print("CURRENT LOWEST LOSS IS {}".format(lowest))
+
+def network(image, verbose=False):
     global mask_loader
     try:
         mask = next(mask_loader)[0].to(device)
     except Exception as e:
         print("finished mask loader with exception {}".format(e))
-        mask_loader = iter(DataLoader(masks, num_workers=0, batch_size=args.batch_size, pin_memory=True))
+        mask_loader = iter(DataLoader(masks, num_workers=0, batch_size=args.batch_size, pin_memory=True, shuffle=True))
         mask = next(mask_loader)[0].to(device)
 
-    model.train()
     image, mask = image[0].to(device), mask.to(device)
+
     mask[mask != 1] = 0
-    
+
     masked = image * mask
 
     out = model(masked, mask)
-    loss = loss_func(masked, mask, out, image)
+    loss = loss_func(masked, mask, out, image, verbose=verbose)
 
     return loss, out, image, mask
 
+def validate(n):
+    model.eval()
+
+    print("Validating on {} samples".format(n))
+
+    total_loss = 0
+    first = True
+    for j, image in enumerate(itertools.islice(valid_loader, n)):
+        loss, out, image, mask = network(image, verbose=first)
+        first=False
+        total_loss += float(loss.detach().cpu())
+
+    total_loss /= j
+
+    plotter.plot("In-Painting", "Valid Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, total_loss, xlabel='iterations')
+
+    plotter.imshow("masks", mask)
+    plotter.imshow("masked", mask * unnormalize(image) + (1 - mask) * unnormalize(out).clamp(0., 1.))
+    plotter.imshow("output", unnormalize(out).clamp(0., 1.))
+    plotter.imshow("ground-truth", unnormalize(image))
+
+    model.train()
+
+    return total_loss
+
 for epoch in range(args.epochs):
     model.train()
+
     print("[EPOCH {}]".format(epoch))
     for i, image in enumerate(train_loader):
         loss, out, image, mask = network(image)
                 
-        print("[ITER {}] Loss {}".format(i, loss))
+        # print("[ITER {}] Loss {}".format(i, loss))
 
         optimizer.zero_grad()
         loss.backward()
@@ -132,29 +162,14 @@ for epoch in range(args.epochs):
             plotter.plot("In-Painting", "Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, float(loss.detach().cpu()), xlabel='iterations')
     
         if i % args.valid_freq == 0:
-            model.eval()
+            validate(50)
 
-            total_loss = 0
-            for j, image in enumerate(itertools.islice(valid_loader, 50)):
-                loss, out, image, mask = network(image)
-                total_loss += float(loss.detach().cpu())
+    valid_loss = validate(100)
 
-            total_loss /= j
-
-            plotter.plot("In-Painting", "Valid Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, total_loss, xlabel='iterations')
-
-            plotter.imshow("masks", mask)
-            plotter.imshow("masked", mask * unnormalize(image) + (1 - mask) * unnormalize(out).clamp(0., 1.))
-            plotter.imshow("ground-truth", unnormalize(image))
-    
-    plotter.imshow("masks", mask)
-    plotter.imshow("masked", mask * unnormalize(image) + (1 - mask) * unnormalize(out).clamp(0., 1.))
-    plotter.imshow("ground-truth", unnormalize(image))
-
-    if total_loss < lowest:
-        print("[EPOCH {}] Lowest loss {} found".format(epoch, total_loss))
+    if valid_loss < lowest:
+        print("[EPOCH {}] Lowest loss {} found".format(epoch, valid_loss))
         torch.save(model.state_dict(), saved_params)
-        lowest = total_loss
+        lowest = valid_loss
 
         with open(saved_stats, "w") as f:
-            json.dump({"lowest", lowest}, f)
+            json.dump({"lowest" : lowest}, f)

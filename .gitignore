@@ -4,5 +4,6 @@ data/*
 __pycache__
 .vscode
 backup
+saved
 server/static/results
 server/static/masks

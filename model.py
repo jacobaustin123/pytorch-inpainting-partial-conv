@@ -25,6 +25,8 @@ class PartialLayer(nn.Module):
            self.non_linearity = nn.LeakyReLU(negative_slope=0.2)
         elif non_linearity == 'sigmoid':
             self.non_linearity = nn.Sigmoid()
+        elif non_linearity == 'tanh':
+            self.non_linearity = nn.Tanh()
         elif non_linearity is None:
             self.non_linearity = None
         else:
@@ -46,10 +48,12 @@ class PartialLayer(nn.Module):
 
 
 class Model(nn.Module):
-    def __init__(self):
+    def __init__(self, freeze_bn=False):
         super(Model, self).__init__()
 
-        self.conv1 = PartialLayer(3, 64, 7, 2) # encoder for UNET
+        self.freeze_bn = freeze_bn # freeze bn layers for fine tuning
+
+        self.conv1 = PartialLayer(3, 64, 7, 2) # encoder for UNET,  use relu for encoder
         self.conv2 = PartialLayer(64, 128, 5, 2)
         self.conv3 = PartialLayer(128, 256, 5, 2)
         self.conv4 = PartialLayer(256, 512, 3, 2)
@@ -65,7 +69,7 @@ class Model(nn.Module):
         self.conv13 = PartialLayer(512 + 256, 256, 3, 1, non_linearity="leaky", multi_channel=True)
         self.conv14 = PartialLayer(256 + 128, 128, 3, 1, non_linearity="leaky", multi_channel=True)
         self.conv15 = PartialLayer(128 + 64, 64, 3, 1, non_linearity="leaky", multi_channel=True)
-        self.conv16 = PartialLayer(64 + 3, 3, 3, 1, non_linearity=None, bn=False, multi_channel=True)
+        self.conv16 = PartialLayer(64 + 3, 3, 3, 1, non_linearity="tanh", bn=False, multi_channel=True)
 
     def forward(self, x, mask):
         x1, mask1 = self.conv1(x, mask_in=mask)
@@ -95,14 +99,24 @@ class Model(nn.Module):
         return torch.cat([F.interpolate(input, scale_factor=2), prev], dim=1)
 
 
+    def train(self, mode=True):
+        super(Model, self).train(mode)
+
+        if self.freeze_bn:
+            for name, module in self.named_modules():
+                if isinstance(module, nn.BatchNorm2d) and name[0:6] in ["conv" + str(n) + "." for n in range(1, 9)]:
+                    # print("freezing layer {}".format(name))
+                    module.eval()
+
 class VGG16FeatureExtractor(nn.Module):
     def __init__(self):
         super(VGG16FeatureExtractor, self).__init__()
 
-        self.vgg16 = models.vgg16(pretrained=True)
-        self.layer1 = nn.Sequential(*self.vgg16.features[:5])
-        self.layer2 = nn.Sequential(*self.vgg16.features[5:10])
-        self.layer3 = nn.Sequential(*self.vgg16.features[10:17])
+        vgg16 = models.vgg16(pretrained=True)
+
+        self.layer1 = nn.Sequential(*vgg16.features[:5])
+        self.layer2 = nn.Sequential(*vgg16.features[5:10])
+        self.layer3 = nn.Sequential(*vgg16.features[10:17])
 
         for layer in [self.layer1, self.layer2, self.layer3]:
             for param in layer.parameters():

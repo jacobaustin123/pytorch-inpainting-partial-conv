@@ -31,9 +31,9 @@ loss_func.to(device)
 
 optimizer = optim.Adam(model.parameters(), lr=3e-4)
 
-if os.path.exists("/home/jacob/Documents/inpainting/parameters.pt"):
+if os.path.exists("/home/jacob/Documents/inpainting/saved/parameters.pt"):
     try:
-        state_dict = torch.load("/home/jacob/Documents/inpainting/parameters.pt")
+        state_dict = torch.load("/home/jacob/Documents/inpainting/saved/parameters.pt")
         new_dict = collections.OrderedDict()
 
         for key, value in state_dict.items():

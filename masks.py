@@ -3,6 +3,9 @@ import numpy as np
 import random
 from PIL import Image
 
+# adapted from https://github.com/naoto0804/pytorch-inpainting-with-partial-conv/blob/master/generate_data.py
+# with added support for multiprocessing. ultimately not used in favor of official masks
+
 action_list = [[0, 1], [0, -1], [1, 0], [-1, 0]]
 
 def random_walk(canvas, ini_x, ini_y, length):

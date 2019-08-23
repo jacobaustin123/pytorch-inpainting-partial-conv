@@ -32,7 +32,7 @@ def upload():
     mask = torch.Tensor(imageio.imread(mask_str)).permute(2, 0, 1).mean(0).unsqueeze(0).unsqueeze(0)
     mask[mask != 0] = 1.0
 
-    imageio.imwrite("masktest.png", mask.cpu().squeeze().numpy())
+    # imageio.imwrite("masktest.png", mask.cpu().squeeze().numpy())
     print(img.shape, mask.shape)
 
     print(mask)
@@ -44,7 +44,9 @@ def upload():
         f.write(mask_str)
 
     #with open(os.path.join("static/results", timestamp + ".png"), "wb") as f:
-    result = inpainting.network(img, mask).detach().cpu().squeeze().permute(1, 2, 0).numpy()
+    result = inpainting.network(img, mask).detach().cpu()
+    result = (1 - mask) * img + (mask) * result.clamp(0, 1)
+    result = result.squeeze().permute(1, 2, 0).numpy()
     print(result.shape, mask.shape, img.shape)
     imageio.imwrite(os.path.join("static/results", timestamp + ".png"), result)
 
