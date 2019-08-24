@@ -4,6 +4,8 @@ This is a PyTorch implementation of the 2018 paper Image Inpainting for Irregula
 
 In particular, this repository uses the official implementation of the Partial Convolution operation from NVIDIA (https://github.com/NVIDIA/partialconv), reproduced in the partialconv2d.py file. All other code is original except where documented. 
 
+![Examples](examples/example.png)
+
 # Usage
 
 To train the script, simply run `python train.py`. To resume from the pre-trained parameters in the `saved` directory, use `python train.py --resume`. A variety of command-line arguments is available in the `train.py` script. 
