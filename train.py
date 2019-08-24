@@ -22,6 +22,10 @@ plotter = VisdomLinePlotter()
 
 parser = argparse.ArgumentParser(description='An implementation of the 2018 Image Inpainting for Irregular Holes Using Partial Convolutions paper in PyTorch')
 
+parser.add_argument('--datadir', type=str, default="images/train", help='directory for training data')
+parser.add_argument('--validdir', type=str, default="images/valid", help='directory for validation data')
+parser.add_argument('--maskdir', type=str, default="masks/masks", help='directory for mask data')
+
 parser.add_argument('--lr', type=float, default=2e-4, help='learning rate for Adam Optimizer')
 parser.add_argument('--batch_size', type=int, default=8, help='batch size')
 parser.add_argument('--resume', action='store_true', default=False, help='resume from existing save file')
@@ -41,9 +45,9 @@ def unnormalize(image):
     return (image.transpose(1, 3) * std + mean).transpose(1, 3)
 
 device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
-masks = ImageFolder("masks/original-mask", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.Grayscale(), transforms.Lambda(lambda img : PIL.ImageOps.invert(img)), transforms.ToTensor()]))
-train = ImageFolder("images/train", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = std)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-valid = ImageFolder("images/val", transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = mean)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+masks = ImageFolder(args.maskdir, transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.Grayscale(), transforms.Lambda(lambda img : PIL.ImageOps.invert(img)), transforms.ToTensor()]))
+train = ImageFolder(args.datadir, transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = std)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+valid = ImageFolder(args.validdir, transform=transforms.Compose([transforms.Resize(256), transforms.CenterCrop(256), transforms.ToTensor(), transforms.Normalize(mean = mean, std = mean)])) # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
 std = std.to(device)
 mean = mean.to(device)
@@ -54,7 +58,8 @@ valid_loader = DataLoader(valid, num_workers=0, batch_size=args.batch_size, pin_
 mask_loader = iter(DataLoader(masks, num_workers=0, batch_size=args.batch_size, pin_memory=True, drop_last=True, shuffle=True))
 
 print("Training partial convolution inpainting model with parameters {}".format(args))
-print("Train dataset is {}, valid dataset is {}".format(train, valid))
+print("Train dataset has size {}, valid dataset has size {}, mask dataset has size {}".format(len(train), len(valid), len(masks)))
+print("Train directory is {}, valid directory is {}, mask directory is {}".format(args.datadir, args.validdir, args.maskdir))
 
 model = Model(freeze_bn=args.freeze_bn)
 criterion = VGG16FeatureExtractor()
@@ -120,26 +125,31 @@ def network(image, verbose=False):
 
     return loss, out, image, mask
 
-def validate(n):
+def validate(n, valid=True):
     model.eval()
 
-    print("Validating on {} samples".format(n))
+    print("Validating on {} samples from {} dataset".format(n, "valid" if valid else "train"))
 
     total_loss = 0
     first = True
-    for j, image in enumerate(itertools.islice(valid_loader, n)):
+    for j, image in enumerate(itertools.islice(valid_loader if valid else train_loader, n)):
         loss, out, image, mask = network(image, verbose=first)
         first=False
         total_loss += float(loss.detach().cpu())
 
     total_loss /= j
 
-    plotter.plot("In-Painting", "Valid Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, total_loss, xlabel='iterations')
+    if valid:
+        plotter.plot("In-Painting", "Valid Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, total_loss, xlabel='iterations')
+    else:
+        plotter.plot("In-Painting", "Longer Train Loss", "Loss for In-Painting NN", epoch * len(train_loader) + i, total_loss, xlabel='iterations')
 
-    plotter.imshow("masks", mask)
-    plotter.imshow("masked", mask * unnormalize(image) + (1 - mask) * unnormalize(out).clamp(0., 1.))
-    plotter.imshow("output", unnormalize(out).clamp(0., 1.))
-    plotter.imshow("ground-truth", unnormalize(image))
+    if valid:
+        plotter.imshow("trainmasks", mask)
+        plotter.imshow("masked", mask * unnormalize(image) + (1 - mask) * unnormalize(out).clamp(0., 1.))
+        plotter.imshow("output", unnormalize(out).clamp(0., 1.))
+        plotter.imshow("maskedalt", mask * unnormalize(image))
+        plotter.imshow("ground-truth", unnormalize(image))
 
     model.train()
 
@@ -163,8 +173,9 @@ for epoch in range(args.epochs):
     
         if i % args.valid_freq == 0:
             validate(50)
+            validate(50, valid=False)
 
-    valid_loss = validate(100)
+    valid_loss = validate(1000)
 
     if valid_loss < lowest:
         print("[EPOCH {}] Lowest loss {} found".format(epoch, valid_loss))
@@ -173,3 +184,5 @@ for epoch in range(args.epochs):
 
         with open(saved_stats, "w") as f:
             json.dump({"lowest" : lowest}, f)
+    else:
+        print("[EPOCH {}] loss is {}".format(epoch, valid_loss))
