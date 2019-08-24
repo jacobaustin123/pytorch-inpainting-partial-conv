@@ -23,4 +23,4 @@ Many other options can be viewed by running `python train.py -h`. You can do the
 
 To actually use the pre-trained weights in a web browser, run the `server/run.sh` script, which will launch a simple flask server and front-end hosted at port `8020` (can be changed in the `run.sh` script). Open `localhost:8020` to experiment on some simple images with pre-trained weights.
 
-Pretrained weights can be downloaded from `https://drive.google.com/file/d/1Xbhh1H9CwDjVpsuVldxbWC9UGMelGlCA/view?usp=sharing`. This should be placed in the `saved` directory.
+Pretrained weights can be downloaded from https://drive.google.com/file/d/1Xbhh1H9CwDjVpsuVldxbWC9UGMelGlCA/view?usp=sharing. This should be placed in the `saved` directory.
